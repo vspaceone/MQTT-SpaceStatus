@@ -5,15 +5,20 @@
 #include <PubSubClient.h>
 
 #include "config.h"
+#include "neopixel.h"
+#include "state.h"
 
-#define interruptStatePin 4
+#define interruptStatePin 14
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
+State state;
+NeopixelInterface interface(&state);
+
 bool stateOpen = false;
 
-volatile byte interruptStateCounter = 0;
+volatile byte interruptStateCounter = 1;
 
 void connectWiFi() {
   delay(10);
@@ -28,6 +33,7 @@ void connectWiFi() {
     delay(500);
     ESP.wdtFeed();
     Serial.print(".");
+    interface.loop();
   }
   
   Serial.println("");
@@ -56,6 +62,7 @@ void connectMQTT() {
   }
 }
 
+
 // ##############################
 // Interrupt handling
 // ##############################
@@ -67,7 +74,10 @@ void interruptStateSR(){
 void interruptStateHandler(){
   static bool last = false;
 
-  stateOpen = digitalRead(4) == LOW;
+  stateOpen = digitalRead(interruptStatePin) == LOW;
+  state.setLocalSpaceState(stateOpen ? SpaceState::SOPEN : SpaceState::SCLOSED);
+  state.setRemoteSpaceState(stateOpen ? SpaceState::SOPEN : SpaceState::SCLOSED); //TODO query real remote state
+
   if (last != stateOpen){
     StaticJsonBuffer<200> jsonBuffer;
 
@@ -93,26 +103,35 @@ void interruptStateHandler(){
 
 void setup() {
   // State switch
-  pinMode(4, INPUT_PULLUP); 
+  pinMode(interruptStatePin, INPUT_PULLUP); 
   attachInterrupt(digitalPinToInterrupt(interruptStatePin), interruptStateSR, CHANGE);
 
+  state.setConnectionState(ConnectionState::PRE_SERIAL);
   Serial.begin(115200);
-  while (!Serial);
+  while (!Serial){
+    ESP.wdtFeed();
+    interface.loop();
+  };
 
+  state.setConnectionState(ConnectionState::PRE_WIFI);
   connectWiFi();
+
   mqttClient.setServer(mqtt_server, 1883);  
 }
 
 void loop() {
   if (!mqttClient.connected()) {
+    state.setConnectionState(ConnectionState::NO_MQTT);
     connectMQTT();
+  } else if (state.getConnectionState() != ConnectionState::CONN_OK) {
+    state.setConnectionState(ConnectionState::CONN_OK);
   }
   mqttClient.loop();
 
   if (interruptStateCounter > 0){
     interruptStateHandler();
   }
-  
-  // Ensure feeding of watchdog
+
+  interface.loop();
   ESP.wdtFeed();
 }

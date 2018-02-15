@@ -30,6 +30,7 @@ python:
 
 install:
     - pip install -U platformio
+    - pio lib install 547 64
 
 script:
     - platformio run

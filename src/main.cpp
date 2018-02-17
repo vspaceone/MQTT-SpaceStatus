@@ -4,6 +4,8 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 
+#include <cstring>
+
 #include "config.h"
 #include "neopixel.h"
 #include "state.h"
@@ -15,6 +17,8 @@ PubSubClient mqttClient(espClient);
 
 State state;
 NeopixelInterface interface(&state);
+
+long lastCheck = 0;
 
 bool stateOpen = false;
 
@@ -60,6 +64,16 @@ void connectMQTT() {
       delay(5000);
     }
   }
+}
+
+void checkMQTTConnectionAndLoop(){
+  if (!mqttClient.connected()) {
+    state.setConnectionState(ConnectionState::NO_MQTT);
+    connectMQTT();
+  } else if (state.getConnectionState() != ConnectionState::CONN_OK) {
+    state.setConnectionState(ConnectionState::CONN_OK);
+  }
+  mqttClient.loop();
 }
 
 
@@ -116,20 +130,41 @@ void setup() {
   state.setConnectionState(ConnectionState::PRE_WIFI);
   connectWiFi();
 
-  mqttClient.setServer(mqtt_server, 1883);  
+  mqttClient.setServer(mqtt_server, 1883);
+
+  checkMQTTConnectionAndLoop();
+
+  mqttClient.subscribe("vspace/one/spaceapi",1);
+  mqttClient.setCallback([=](char* topic, byte* payload, unsigned int length){
+    std::string s( reinterpret_cast<char const*>(payload), length);
+
+    StaticJsonBuffer<1000> jsonBuffer;
+
+    JsonObject& response = jsonBuffer.parseObject(s.c_str(), 5);
+
+    Serial.printf("Raw: %s, %d\n", s.c_str(), length);
+
+    const char* status = response["status"];
+    const char* type = response["data"]["type"];
+
+    if (strcmp(type, "response") == 0){
+      bool open = response["data"]["spaceapi"]["state"]["open"];
+      Serial.printf("Received: %s, %s, %d\n", status, type, open);
+    }
+
+  });
 }
 
 void loop() {
-  if (!mqttClient.connected()) {
-    state.setConnectionState(ConnectionState::NO_MQTT);
-    connectMQTT();
-  } else if (state.getConnectionState() != ConnectionState::CONN_OK) {
-    state.setConnectionState(ConnectionState::CONN_OK);
-  }
-  mqttClient.loop();
+  checkMQTTConnectionAndLoop();
 
   if (interruptStateCounter > 0){
     interruptStateHandler();
+  }
+
+  if (lastCheck > 5000){  // Check if spaceapi corresponds to local state
+    mqttClient.publish("vspace/one/spaceapi", "{\"status\":\"ok\",\"data\":{\"type\":\"request\"}}");
+    
   }
 
   interface.loop();

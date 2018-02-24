@@ -44,8 +44,8 @@ void NeopixelInterface::loop(){
         break;
     case InterfaceState::ERROR:
         if (millis() - ifChange > 10000){
-            startAnimationBlinkAll(RgbColor(255,69,0));
-        } else if (millis() - ifChange > 5000){
+            startAnimationSolid(RgbColor(255,69,0));
+        } else if (millis() - ifChange > 8000){
             startAnimationRotate(RgbColor(255,69,0));
         }
         break;
@@ -170,12 +170,13 @@ void NeopixelInterface::animationBlinkAll(const AnimationParam &param){
             strip.SetPixelColor(
                 i,RgbColor::LinearBlend(RgbColor(0),animationColor,param.progress*2));
         }        
-    } else if (param.progress < 1){
+    } else if (param.progress <= 1){
         for (int i = 0; i < neopixelCount; i++){
             strip.SetPixelColor(
-                i,RgbColor::LinearBlend(animationColor,RgbColor(0),param.progress*2));
+                i,RgbColor::LinearBlend(animationColor,RgbColor(0),(param.progress*2) - 0.5));
         }
     }
+
 
     if (param.state == AnimationState_Completed && !stateChanged){
         animator.RestartAnimation(param.index);

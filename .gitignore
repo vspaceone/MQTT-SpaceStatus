@@ -6,3 +6,5 @@
 .vscode/launch.json
 
 src/config.h
+.vscode/*.db
+.vscode

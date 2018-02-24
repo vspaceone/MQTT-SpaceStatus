@@ -43,10 +43,10 @@ void NeopixelInterface::loop(){
         }
         break;
     case InterfaceState::ERROR:
-        if (millis() - ifChange > 1900){
-            startAnimationBlinkAll(RgbColor(255,150,150));
-        } else {
-            startAnimationRotate(RgbColor(255,150,150));
+        if (millis() - ifChange > 10000){
+            startAnimationBlinkAll(RgbColor(255,69,0));
+        } else if (millis() - ifChange > 5000){
+            startAnimationRotate(RgbColor(255,69,0));
         }
         break;
     }
@@ -65,6 +65,7 @@ void NeopixelInterface::updateInterfaceState(){
     case ConnectionState::PRE_WIFI:
     case ConnectionState::NO_MQTT:
         if (ifState != InterfaceState::UNCONNECTED){
+            Serial.println("IfState UNCONNECTED");
             ifState = InterfaceState::UNCONNECTED;
             ifChange = millis();
         }
@@ -73,6 +74,7 @@ void NeopixelInterface::updateInterfaceState(){
 
     if (localState != remoteState){
         if (ifState != InterfaceState::ERROR){
+            Serial.printf("IfState ERROR: Local is %s but remote %s\n", localState == SpaceState::SOPEN ? "Open" : "Closed", remoteState == SpaceState::SOPEN ? "Open" : "Closed");
             ifState =  InterfaceState::ERROR;
             ifChange = millis();
         }
@@ -81,6 +83,7 @@ void NeopixelInterface::updateInterfaceState(){
 
     if (localState == SpaceState::SOPEN){
         if (ifState != InterfaceState::OPEN){
+            Serial.println("IfState OPEN");
             ifState =  InterfaceState::OPEN;
             ifChange = millis();
         }
@@ -89,6 +92,7 @@ void NeopixelInterface::updateInterfaceState(){
 
     if (localState == SpaceState::SCLOSED){
         if (ifState != InterfaceState::CLOSED){
+            Serial.println("IfState CLOSED");
             ifState =  InterfaceState::CLOSED;
             ifChange = millis();
         }

@@ -76,6 +76,11 @@ void checkMQTTConnectionAndLoop(){
   mqttClient.loop();
 }
 
+void requestSpaceStateUpdate(){
+  //Serial.println("Requesting state");
+  mqttClient.publish("vspace/one/request", "{\"status\":\"ok\",\"data\":{\"request\":\"vspace/one/spaceapi.state.open\"}}");
+  lastCheck = millis();
+}
 
 // ##############################
 // Interrupt handling
@@ -89,8 +94,9 @@ void interruptStateHandler(){
   static bool last = false;
 
   stateOpen = digitalRead(interruptStatePin) == LOW;
+  
   state.setLocalSpaceState(stateOpen ? SpaceState::SOPEN : SpaceState::SCLOSED);
-  state.setRemoteSpaceState(stateOpen ? SpaceState::SOPEN : SpaceState::SCLOSED); //TODO query real remote state
+  requestSpaceStateUpdate(); // Requesting remote state
 
   if (last != stateOpen){
     StaticJsonBuffer<200> jsonBuffer;
@@ -110,6 +116,8 @@ void interruptStateHandler(){
 
   interruptStateCounter = 0;
 }
+
+
 
 // ##############################
 // Arduino "main" functions
@@ -137,19 +145,25 @@ void setup() {
   mqttClient.subscribe("vspace/one/spaceapi",1);
   mqttClient.setCallback([=](char* topic, byte* payload, unsigned int length){
     std::string s( reinterpret_cast<char const*>(payload), length);
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& response = jsonBuffer.parseObject(s.c_str());
 
-    StaticJsonBuffer<1000> jsonBuffer;
+    if (!response.success()) {
+      Serial.println("Error while parsing");
+      return;
+    }        
 
-    JsonObject& response = jsonBuffer.parseObject(s.c_str(), 5);
+    const char* status = response["status"];    
+    const char* request = response["data"]["request"];
 
-    Serial.printf("Raw: %s, %d\n", s.c_str(), length);
+    int ok = std::strcmp(status, "ok\0");
+    int isRequested = std::strcmp(request, "vspace/one/spaceapi.state.open\0");
 
-    const char* status = response["status"];
-    const char* type = response["data"]["type"];
-
-    if (strcmp(type, "response") == 0){
-      bool open = response["data"]["spaceapi"]["state"]["open"];
-      Serial.printf("Received: %s, %s, %d\n", status, type, open);
+    if ((strcmp(status, "ok") == 0) 
+        && (strcmp(request, "vspace/one/spaceapi.state.open") == 0)){
+      const bool open = response["data"]["response"];
+      //Serial.printf("Received: %s, %s, %d\n", status, request, open);
+      state.setRemoteSpaceState(open ? SpaceState::SOPEN : SpaceState::SCLOSED);
     }
 
   });
@@ -162,9 +176,8 @@ void loop() {
     interruptStateHandler();
   }
 
-  if (lastCheck > 5000){  // Check if spaceapi corresponds to local state
-    mqttClient.publish("vspace/one/spaceapi", "{\"status\":\"ok\",\"data\":{\"type\":\"request\"}}");
-    
+  if ((millis() - lastCheck) > 5000){  // Check if spaceapi corresponds to local state
+    requestSpaceStateUpdate();
   }
 
   interface.loop();

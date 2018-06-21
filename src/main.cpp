@@ -8,7 +8,7 @@
 #include "neopixel.h"
 #include "state.h"
 
-#define interruptStatePin 14
+#define interruptStatePin 12
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);

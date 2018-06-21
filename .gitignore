@@ -6,3 +6,4 @@
 .vscode/launch.json
 
 src/config.h
+.vscode/.browse.c_cpp.db*

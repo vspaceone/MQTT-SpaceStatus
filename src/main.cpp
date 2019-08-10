@@ -79,16 +79,16 @@ void interruptStateHandler(){
   state.setRemoteSpaceState(stateOpen ? SpaceState::SOPEN : SpaceState::SCLOSED); //TODO query real remote state
 
   if (last != stateOpen){
-    StaticJsonBuffer<200> jsonBuffer;
+    StaticJsonDocument<200> jsonBuffer;
 
-    JsonObject& root = jsonBuffer.createObject();
+    JsonObject root = jsonBuffer.to<JsonObject>();
     root["status"] = "ok";
 
-    JsonObject& data = root.createNestedObject("data");
+    JsonObject data = root.createNestedObject("data");
     data["open"] = stateOpen?true:false;
 
     char message[200];
-    root.printTo((char*)message, root.measureLength() + 1);
+    serializeJson(root,(char*)message, measureJson(root) + 1);
 
     mqttClient.publish("vspace/one/state/open", message);
     last = stateOpen;

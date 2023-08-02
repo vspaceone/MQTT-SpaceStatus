@@ -1,5 +1,3 @@
-#include <FS.h>
-#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
@@ -8,7 +6,7 @@
 #include "neopixel.h"
 #include "state.h"
 
-#define interruptStatePin 12
+#define interruptStatePin 14
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -18,8 +16,6 @@ NeopixelInterface interface(&state);
 
 bool stateOpen = false;
 
-volatile byte interruptStateCounter = 1;
-
 void connectWiFi() {
   delay(10);
 
@@ -28,14 +24,13 @@ void connectWiFi() {
   WiFi.begin(wifi_ssid, wifi_password);
 
   Serial.print("Connecting");
-  while (WiFi.status() != WL_CONNECTED)
-  {
+  while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     ESP.wdtFeed();
     Serial.print(".");
     interface.loop();
   }
-  
+
   Serial.println("");
   Serial.print("WiFi connected ");
   Serial.println(WiFi.localIP());
@@ -52,6 +47,7 @@ void connectMQTT() {
     // Attempt to connect
     if (mqttClient.connect("vspace.one.state.open", mqtt_user, mqtt_password)) {
       Serial.println("connected");
+      mqttClient.subscribe(mqtt_topic);
     } else {
       Serial.print("failed, rc=");
       Serial.print(mqttClient.state());
@@ -67,34 +63,51 @@ void connectMQTT() {
 // Interrupt handling
 // ##############################
 
-void interruptStateSR(){
-  interruptStateCounter++;
+uint64_t time_to_update = 0;  //set to pow(2,64)-1 to prevent setting state on boot
+
+IRAM_ATTR void interruptStateSR() {
+  time_to_update = millis() + 100;  //only after there have been no interrupts for 100ms will the state update
 }
 
-void interruptStateHandler(){
-  static bool last = false;
+void update_status() {
 
   stateOpen = digitalRead(interruptStatePin) == LOW;
   state.setLocalSpaceState(stateOpen ? SpaceState::SOPEN : SpaceState::SCLOSED);
-  state.setRemoteSpaceState(stateOpen ? SpaceState::SOPEN : SpaceState::SCLOSED); //TODO query real remote state
 
-  if (last != stateOpen){
-    StaticJsonBuffer<200> jsonBuffer;
+  StaticJsonDocument<128> doc;
 
-    JsonObject& root = jsonBuffer.createObject();
-    root["status"] = "ok";
+  doc["status"] = "ok";
 
-    JsonObject& data = root.createNestedObject("data");
-    data["open"] = stateOpen?true:false;
+  doc["data"]["open"] = stateOpen ? true : false;
 
-    char message[200];
-    root.printTo((char*)message, root.measureLength() + 1);
+  uint16_t len = measureJson(doc) + 1;
+  char message[len];
+  serializeJson(doc, message, len);
 
-    mqttClient.publish("vspace/one/state/open", message);
-    last = stateOpen;
+  if (mqttClient.publish(mqtt_topic, message))
+    Serial.println("PUB OK");
+    //state.setRemoteSpaceState(stateOpen ? SpaceState::SOPEN : SpaceState::SCLOSED);
+
+  time_to_update = 0xFFFFFFFFFFFFFFFF;  //just set it to the max value of an uint64_t so it won't run again
+}
+
+void mqttCallback(char* topic, byte* pl, uint16_t len) {
+  Serial.print("Incoming data on ");
+  Serial.println(topic);
+  Serial.write(pl, len);
+  Serial.println();
+  if (strcmp(topic, mqtt_topic) == 0) {
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, pl, len);
+    if (err == DeserializationError::Ok) {
+      //if (doc["open"].is<bool>()) {
+      state.setRemoteSpaceState(doc["data"]["open"].as<bool>() ? SpaceState::SOPEN : SpaceState::SCLOSED);
+      //}
+    } else {
+      Serial.print("Incoming JSON DeserializationError ");
+      Serial.println(err.f_str());
+    }
   }
-
-  interruptStateCounter = 0;
 }
 
 // ##############################
@@ -103,12 +116,12 @@ void interruptStateHandler(){
 
 void setup() {
   // State switch
-  pinMode(interruptStatePin, INPUT_PULLUP); 
+  pinMode(interruptStatePin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(interruptStatePin), interruptStateSR, CHANGE);
 
   state.setConnectionState(ConnectionState::PRE_SERIAL);
   Serial.begin(115200);
-  while (!Serial){
+  while (!Serial) {
     ESP.wdtFeed();
     interface.loop();
   };
@@ -116,7 +129,8 @@ void setup() {
   state.setConnectionState(ConnectionState::PRE_WIFI);
   connectWiFi();
 
-  mqttClient.setServer(mqtt_server, 1883);  
+  mqttClient.setCallback(mqttCallback);
+  mqttClient.setServer(mqtt_server, 1883);
 }
 
 void loop() {
@@ -128,8 +142,8 @@ void loop() {
   }
   mqttClient.loop();
 
-  if (interruptStateCounter > 0){
-    interruptStateHandler();
+  if (millis() > time_to_update) {
+    update_status();
   }
 
   interface.loop();
